@@ -2,173 +2,147 @@
 setlocal
 
 echo ===============================================
-echo  Instalador de dependencias para Whisper (Windows)
+echo  Instalador de dependencias para Insanely-Fast-Whisper (Windows)
 echo ===============================================
 echo.
 
-:: -------------------------------------------------
 :: 1. Verificar permisos de Administrador
-:: -------------------------------------------------
 net session >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Este script debe ejecutarse como Administrador.
-    echo Haz clic derecho en este archivo y selecciona 'Ejecutar como Administrador'.
-    pause
-    exit /b
+    echo [ERROR] Ejecuta este script como Administrador.
+    pause & exit /b
 )
 
-:: -------------------------------------------------
-:: 2. Verificar e Instalar Chocolatey
-:: -------------------------------------------------
+:: 2. Verificar e instalar Chocolatey
 echo [INFO] Verificando Chocolatey...
 choco -v >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Chocolatey no esta instalado. Instalando Chocolatey...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+    echo [INFO] Instalando Chocolatey...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
     if errorlevel 1 (
         echo [ERROR] No se pudo instalar Chocolatey.
-        pause
-        exit /b
+        pause & exit /b
     )
-    echo [INFO] Chocolatey instalado correctamente.
+    echo [INFO] Chocolatey instalado.
 ) else (
-    echo [INFO] Chocolatey ya esta instalado.
+    echo [INFO] Chocolatey ya está instalado.
 )
 echo.
 
-:: -------------------------------------------------
-:: 3. Verificar e Instalar FFmpeg
-:: -------------------------------------------------
+:: 3. Verificar e instalar ffmpeg
 echo [INFO] Verificando ffmpeg...
 ffmpeg -version >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] ffmpeg no esta instalado. Instalando ffmpeg...
+    echo [INFO] Instalando ffmpeg...
     choco install ffmpeg -y
     if errorlevel 1 (
         echo [ERROR] No se pudo instalar ffmpeg.
-        pause
-        exit /b
+        pause & exit /b
     )
-    echo [INFO] ffmpeg instalado correctamente.
+    echo [INFO] ffmpeg instalado.
 ) else (
-    echo [INFO] ffmpeg ya esta instalado.
+    echo [INFO] ffmpeg ya está instalado.
 )
 echo.
 
-:: -------------------------------------------------
-:: 4. Verificar e Instalar Python
-:: -------------------------------------------------
-echo [INFO] Verificando instalacion de Python...
+:: 4. Verificar e instalar Python
+echo [INFO] Verificando Python...
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Python no esta instalado. Instalando Python...
+    echo [INFO] Instalando Python...
     choco install python -y
     if errorlevel 1 (
         echo [ERROR] No se pudo instalar Python.
-        pause
-        exit /b
+        pause & exit /b
     )
-    echo [INFO] Python instalado correctamente.
+    echo [INFO] Python instalado.
 ) else (
-    echo [INFO] Python ya esta instalado.
+    echo [INFO] Python ya está instalado.
 )
 echo.
 
-:: -------------------------------------------------
-:: 5. Crear (si no existe) y Activar el Entorno Virtual
-:: -------------------------------------------------
+:: 5. Crear y activar entorno virtual
 if not exist whisper_env (
-    echo [INFO] Creando entorno virtual whisper_env...
+    echo [INFO] Creando entorno virtual...
     python -m venv whisper_env
     if errorlevel 1 (
         echo [ERROR] No se pudo crear el entorno virtual.
-        pause
-        exit /b
+        pause & exit /b
     )
 ) else (
-    echo [INFO] El entorno virtual whisper_env ya existe.
+    echo [INFO] Entorno virtual ya existe.
 )
-
 echo [INFO] Activando entorno virtual...
 call whisper_env\Scripts\activate
 echo.
 
-:: -------------------------------------------------
 :: 6. Actualizar pip
-:: -------------------------------------------------
 echo [INFO] Actualizando pip...
 python -m pip install --upgrade pip
-if errorlevel 1 (
-    echo [WARNING] No se pudo actualizar pip, se continuara de todas formas...
-) else (
-    echo [INFO] pip actualizado correctamente.
-)
 echo.
 
-:: -------------------------------------------------
-:: 7. Verificar PyTorch con CUDA
-:: -------------------------------------------------
+:: 7. Instalar PyTorch con CUDA
 echo [INFO] Verificando PyTorch con CUDA...
 pip show torch >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] PyTorch con CUDA no esta instalado. Instalando...
+    echo [INFO] Instalando torch-cu118...
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
     if errorlevel 1 (
-        echo [ERROR] No se pudo instalar PyTorch con CUDA. Revisa tu conexion o la version de CUDA.
-        pause
-        exit /b
+        echo [ERROR] No se pudo instalar PyTorch CUDA.
+        pause & exit /b
     )
-    echo [INFO] PyTorch con CUDA instalado correctamente.
+    echo [INFO] PyTorch con CUDA instalado.
 ) else (
-    echo [INFO] PyTorch con CUDA ya esta instalado o detectado en el entorno.
+    echo [INFO] PyTorch con CUDA ya está instalado.
 )
 echo.
 
-:: -------------------------------------------------
-:: 8. Verificar e Instalar Whisper
-:: -------------------------------------------------
-echo [INFO] Verificando instalacion de Whisper...
-whisper --help >nul 2>&1
+:: 8. Instalar faster-whisper-cli y ffmpeg-python
+echo [INFO] Instalando faster-whisper-cli y ffmpeg-python...
+pip show faster-whisper-cli >nul 2>&1 || pip install faster-whisper-cli
+pip show ffmpeg-python    >nul 2>&1 || pip install ffmpeg-python
+echo.
+
+:: 9. Instalar onnxruntime-gpu para CTranslate2
+echo [INFO] Instalando onnxruntime-gpu...
+pip show onnxruntime-gpu >nul 2>&1 || pip install onnxruntime-gpu
+echo.
+
+:: 10. Verificar runtime CUDA (cuBLAS)
+echo [INFO] Comprobando cublas64_12.dll...
+where cublas64_12.dll >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] Whisper no esta instalado. Revisando con pip...
-    pip show openai-whisper >nul 2>&1
+    echo [INFO] CUDA runtime no encontrado. Instalando CUDA Toolkit 12...
+    choco install cuda -y
     if errorlevel 1 (
-        echo [INFO] Instalando Whisper y ffmpeg-python...
-        pip install openai-whisper ffmpeg-python
-        if errorlevel 1 (
-            echo [ERROR] No se pudo instalar Whisper.
-            pause
-            exit /b
-        )
-        echo [INFO] Whisper instalado correctamente.
-    ) else (
-        echo [INFO] Whisper figura instalado segun pip.
-        echo [INFO] Si whisper --help no funciona, cierra y abre otra terminal con el entorno activo.
+        echo [ERROR] No se pudo instalar CUDA Toolkit. Instálalo manualmente desde NVIDIA.
+        pause & exit /b
     )
+    echo [INFO] CUDA Toolkit instalado.
 ) else (
-    echo [INFO] Whisper ya esta instalado en el entorno virtual.
+    echo [INFO] CUDA runtime encontrado.
 )
 echo.
 
-:: -------------------------------------------------
-:: 9. Descargar Modelo Whisper medium
-:: -------------------------------------------------
-echo [INFO] Descargando el modelo medium de Whisper...
-python -c "import whisper; whisper.load_model('medium')"
+:: 10b. Añadir CUDA al PATH de usuario permanentemente
+for /f "delims=" %%D in ('dir /b /ad "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"') do set "CUDADIR=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\%%D"
+setx PATH "%PATH%;%CUDADIR%\bin;%CUDADIR%\lib\x64" >nul
+echo [INFO] Rutas CUDA añadidas al PATH de usuario. Cierra sesión o reinicia CMD para aplicar cambios.
+echo.
+
+:: 11. Pre-descargar modelo distil-large-v2
+echo [INFO] Descargando distil-large-v2...
+python -c "from faster_whisper import WhisperModel; WhisperModel('distil-large-v2', device='cuda')"
 if errorlevel 1 (
-    echo [ERROR] No se pudo descargar el modelo medium.
-    pause
-    exit /b
+    echo [ERROR] No se pudo descargar el modelo distil-large-v2.
+    pause & exit /b
 )
-echo [INFO] Modelo medium descargado correctamente.
+echo [INFO] Modelo distil-large-v2 descargado correctamente.
 echo.
 
-:: -------------------------------------------------
-:: 10. Mensaje Final
-:: -------------------------------------------------
 echo ===============================================
-echo  Instalacion completa
-echo  Ahora puedes ejecutar 01_transcriptor.bat para transcribir audios.
+echo  Instalación completa. Ejecuta 02_transcriptor.bat
 echo ===============================================
 pause
 exit /b

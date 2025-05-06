@@ -1,90 +1,94 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 
-REM -------------------------------------------------
-REM 1. Moverse al directorio donde esta este script
-REM -------------------------------------------------
+:: 0. Ir al directorio del script
 cd /d %~dp0
 
 echo ===============================================
-echo  Activando entorno virtual whisper_env...
+echo  Transcriptor GPU con Insanely-Fast-Whisper
 echo ===============================================
-call whisper_env\Scripts\activate || (
-    echo [ERROR] No se pudo activar el entorno virtual.
-    pause
-    exit /b
-)
-
-REM -------------------------------------------------
-REM 2. Verificar carpetas audios y transcripciones
-REM -------------------------------------------------
-if not exist audios (
-    echo [ERROR] La carpeta 'audios' no existe.
-    pause
-    exit /b
-)
-
-if not exist transcripciones (
-    echo [INFO] Creando carpeta 'transcripciones'...
-    mkdir transcripciones
-)
-
-echo ===============================================
-echo  Iniciando proceso de conversion y transcripcion
-echo ===============================================
-
-REM -------------------------------------------------
-REM 3. Recorrer los archivos de la carpeta audios
-REM -------------------------------------------------
-for %%F in (audios\*.*) do call :PROCESS_FILE "%%F"
-
 echo.
+
+:: 1. Activar entorno virtual
+if not exist whisper_env (
+    echo [ERROR] No encuentro la carpeta whisper_env. Ejecuta primero 00_instalar_dependencias.bat
+    pause
+    exit /b
+)
+call whisper_env\Scripts\activate
+
+:: 2. Verificar CUDA runtime
+where cublas64_12.dll >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] cublas64_12.dll no se encuentra en el PATH.
+    echo Asegurate de cerrar la sesion o reiniciar CMD tras la instalacion de CUDA Toolkit.
+    pause
+    exit /b
+)
+
+:: 3. Verificar ffmpeg
+where ffmpeg >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] ffmpeg no se encontro.
+    pause
+    exit /b
+)
+
+:: 4. Preparar carpetas
+if not exist audios (
+    mkdir audios
+    echo [ERROR] Carpeta "audios\" creada. Pon tus archivos ahi y vuelve a ejecutar.
+    pause
+    exit /b
+)
+if not exist transcripciones mkdir transcripciones
+
 echo ===============================================
-echo  Proceso completado
+echo  Iniciando transcripcion de audios
+echo ===============================================
+echo.
+
+:: 5. Crear script Python temporal
+set "PYFILE=%TEMP%\transcribe_gpu.py"
+del "%PYFILE%" 2>nul
+> "%PYFILE%" echo import sys
+>>"%PYFILE%" echo from faster_whisper import WhisperModel
+>>"%PYFILE%" echo model = WhisperModel("distil-large-v2", device="cuda")
+>>"%PYFILE%" echo segments, _ = model.transcribe(sys.argv[1], beam_size=5)
+>>"%PYFILE%" echo out = sys.argv[2]
+>>"%PYFILE%" echo with open(out, "w", encoding="utf-8") as f:
+>>"%PYFILE%" echo     for seg in segments: f.write(seg.text.strip() + "\n")
+
+:: 6. Procesar cada audio
+for %%F in (audios\*.*) do (
+    echo -----------------------------------------------
+    echo Procesando: %%~nxF
+
+    ffmpeg -y -i "%%F" temp.wav
+    if errorlevel 1 (
+        echo [ERROR] Error al convertir %%~nxF
+        goto :nextLoop
+    )
+
+    python "%PYFILE%" "temp.wav" "transcripciones/%%~nF.txt"
+    if errorlevel 1 (
+        echo [ERROR] Fallo la transcripcion de %%~nxF
+        del temp.wav
+        goto :nextLoop
+    )
+
+    del temp.wav
+    echo [INFO] Guardado: transcripciones\%%~nF.txt
+
+    :nextLoop
+    echo.
+)
+
+:: 7. Borrar script Python temporal
+del "%PYFILE%"
+
+echo ===============================================
+echo  Proceso completado.
 echo ===============================================
 pause
 exit /b
-
-REM -------------------------------------------------
-REM SUBRUTINA: PROCESS_FILE
-REM -------------------------------------------------
-:PROCESS_FILE
-set "INPUT=%~1"
-set "BASE=%~n1"
-
-echo -----------------------------------------------
-echo Procesando archivo: %INPUT%
-
-REM 3.1 - Convertir a WAV con ffmpeg
-ffmpeg -y -i "%INPUT%" "temp.wav"
-if errorlevel 1 (
-    echo [ERROR] Fallo la conversion de %INPUT%.
-    goto :EOF
-)
-
-REM 3.2 - Transcribir con Whisper (modelo medium), solo formato .txt
-whisper temp.wav --output_dir transcripciones --model medium --output_format txt
-if errorlevel 1 (
-    echo [ERROR] Fallo la transcripcion de %INPUT%.
-    goto :CLEANUP
-)
-
-REM 3.3 - Renombrar el archivo transcrito 'temp.txt' a '%BASE%.txt'
-REM        y sobrescribir si ya existe
-if exist "transcripciones\%BASE%.txt" del "transcripciones\%BASE%.txt"
-if exist "transcripciones\temp.txt" (
-    ren "transcripciones\temp.txt" "%BASE%.txt"
-    echo [INFO] Se guardo la transcripcion en transcripciones\%BASE%.txt
-) else (
-    echo [WARNING] No se encontro 'transcripciones\\temp.txt'
-)
-
-:CLEANUP
-REM 3.4 - Eliminar el WAV temporal
-if exist temp.wav del temp.wav
-
-REM 3.5 - Eliminar archivos residuales (p.ej. temp.*) por si tu version de Whisper crea algo mas
-if exist "transcripciones\temp.*" del "transcripciones\temp.*"
-if exist "transcripciones\temp" del "transcripciones\temp"
-
-goto :EOF
