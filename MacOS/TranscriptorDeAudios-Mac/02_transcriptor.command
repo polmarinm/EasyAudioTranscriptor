@@ -1,74 +1,116 @@
 #!/usr/bin/env bash
 set -e
 
-# 1. Ir al directorio del script
+# ----------------------------------------------------------------
+# 1. Cambiar al directorio donde está este script
+# ----------------------------------------------------------------
 cd "$(dirname "$0")"
 
-# 2. Ajustar PATH para Homebrew
+# ----------------------------------------------------------------
+# 2. Ajustar PATH para que Finder encuentre ffmpeg (Homebrew)
+#    En Apple Silicon se instala en /opt/homebrew/bin
+#    En Intel, en /usr/local/bin. Verifica con 'which ffmpeg'
+# ----------------------------------------------------------------
 export PATH="/opt/homebrew/bin:$PATH"
 
-# 3. Activar entorno virtual
+# ----------------------------------------------------------------
+# 3. Activar el entorno virtual
+# ----------------------------------------------------------------
 echo "==============================================="
 echo " Activando entorno virtual 'whisper_env'..."
 echo "==============================================="
 echo
 source whisper_env/bin/activate
 
-# 4. Verificar ffmpeg y Python
-command -v ffmpeg >/dev/null 2>&1 || { echo "[ERROR] ffmpeg no encontrado."; exit 1; }
-command -v python3 >/dev/null 2>&1 || { echo "[ERROR] python3 no encontrado."; exit 1; }
+# ----------------------------------------------------------------
+# 4. Comprobar que 'whisper' y 'ffmpeg' son accesibles
+# ----------------------------------------------------------------
+command -v ffmpeg >/dev/null 2>&1 || { echo "[ERROR] ffmpeg no se encontró en el PATH."; exit 1; }
+command -v whisper >/dev/null 2>&1 || { echo "[ERROR] El comando 'whisper' no se encontró en el entorno virtual."; exit 1; }
 
-# 5. Crear / comprobar carpetas
-mkdir -p audios transcripciones
+# ----------------------------------------------------------------
+# 5. Verificar carpetas
+# ----------------------------------------------------------------
+if [ ! -d "audios" ]; then
+  echo "[ERROR] La carpeta 'audios/' no existe. Por favor, créala y coloca allí los archivos de audio."
+  exit 1
+fi
+
+if [ ! -d "transcripciones" ]; then
+  echo "[INFO] Creando carpeta 'transcripciones/'..."
+  mkdir transcripciones
+fi
 
 echo "==============================================="
-echo " Iniciando transcripción con faster_whisper"
+echo " Iniciando proceso de conversión y transcripción"
 echo "==============================================="
 echo
 
-# 6. Procesar cada archivo
+# ----------------------------------------------------------------
+# 6. Procesar todos los archivos .*
+# ----------------------------------------------------------------
 shopt -s nullglob
+
 for INPUT in audios/*.*; do
-  [ -f "$INPUT" ] || continue
-
-  BASENAME="$(basename "$INPUT")"
-  BASE="${BASENAME%.*}"
-  OUT="transcripciones/${BASE}.txt"
-
-  echo "-----------------------------------------------"
-  echo "Procesando: $INPUT -> $OUT"
-
-  # eliminamos previo
-  rm -f "$OUT"
-
-  # Ejecutamos Python inline
-  python3 - << 'PYCODE'
-import sys
-from faster_whisper import WhisperModel
-
-input_path = sys.argv[1]
-output_path = sys.argv[2]
-
-# Cargamos el modelo (se mantendrá en caché una vez descargado)
-model = WhisperModel("distil-large-v2", device="mps")
-
-# Transcribimos
-segments, _ = model.transcribe(input_path, beam_size=5)
-
-# Escribimos resultado
-with open(output_path, "w") as f:
-    for segment in segments:
-        f.write(segment.text.strip() + "\n")
-PYCODE
-  # Pasamos rutas al bloque Python
-  if [ $? -ne 0 ]; then
-    echo "[ERROR] Falló la transcripción de '$INPUT'."
+  if [ ! -f "$INPUT" ]; then
     continue
   fi
 
-  echo "[INFO] Transcripción guardada en $OUT"
+  echo "-----------------------------------------------"
+  echo "Procesando archivo: $INPUT"
+
+  BASENAME="$(basename "$INPUT")"
+  BASE="${BASENAME%.*}"
+
+  set +e  # Para capturar errores individualmente
+  
+  # ----------------------------------------------------------------
+  # 6.1 Convertir a WAV con ffmpeg
+  # ----------------------------------------------------------------
+  ffmpeg -y -i "$INPUT" "temp.wav"
+  ffmpeg_status=$?
+  if [ $ffmpeg_status -ne 0 ]; then
+    echo "[ERROR] Error al convertir '$INPUT' a WAV. Se omite este archivo."
+    rm -f temp.wav
+    set -e
+    continue
+  fi
+
+  # ----------------------------------------------------------------
+  # 6.2 Transcribir con Whisper (modelo small)
+  # ----------------------------------------------------------------
+  whisper temp.wav --output_dir transcripciones --model small --output_format txt
+  whisper_status=$?
+  set -e
+
+  if [ $whisper_status -ne 0 ]; then
+    echo "[ERROR] Error al transcribir '$INPUT'. Se omite este archivo."
+    rm -f temp.wav
+    continue
+  fi
+
+  # ----------------------------------------------------------------
+  # 6.3 Renombrar 'temp.txt' a "$BASE.txt"
+  # ----------------------------------------------------------------
+  if [ -f "transcripciones/temp.txt" ]; then
+    if [ -f "transcripciones/$BASE.txt" ]; then
+      rm "transcripciones/$BASE.txt"
+    fi
+    mv "transcripciones/temp.txt" "transcripciones/$BASE.txt"
+    echo "[INFO] Se guardó la transcripción: transcripciones/$BASE.txt"
+  else
+    echo "[WARNING] No se encontró 'transcripciones/temp.txt' para '$INPUT'."
+  fi
+
+  # ----------------------------------------------------------------
+  # 6.4 Eliminar archivos temporales
+  # ----------------------------------------------------------------
+  rm -f temp.wav
+  rm -f transcripciones/temp.*
+
   echo
 done
+
 shopt -u nullglob
 
 echo "==============================================="
